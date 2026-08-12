@@ -25,3 +25,24 @@ func TestEscapeQuotesOfCommandLineTemplate(t *testing.T) {
 		t.Errorf("Command line template output not as expected: %s", err.Error())
 	}
 }
+
+func TestDeleteFileTemplate_IsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	var rendered bytes.Buffer
+	err := deleteFileTemplate.Execute(&rendered, deleteFileTemplateOptions{FilePath: `C:/Temp/test.iso`})
+	if err != nil {
+		t.Fatalf("unable to render delete file template: %v", err)
+	}
+
+	got := rendered.String()
+	if got == "" {
+		t.Fatal("expected delete file template output, got empty string")
+	}
+	if !bytes.Contains([]byte(got), []byte("exit 0")) {
+		t.Fatalf("expected delete file template to succeed when the path is missing or removed already, got: %s", got)
+	}
+	if bytes.Contains([]byte(got), []byte("$LastExitCode")) {
+		t.Fatalf("delete file template should not rely on stale $LastExitCode, got: %s", got)
+	}
+}

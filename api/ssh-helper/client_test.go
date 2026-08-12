@@ -652,3 +652,21 @@ func TestPrepareCommandWindowsWithVars(t *testing.T) {
 		t.Fatalf("expected original command to be included in decoded command, got %q", decodedStr)
 	}
 }
+
+func TestBuildDeleteCommandWindowsIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	got := buildDeleteCommand(`V:/kube_nodes/test_test_test-1/test_test_test-1_cidata.zip`, true)
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(got)), "powershell ") {
+		t.Fatalf("expected raw powershell script, not an explicit powershell invocation, got %q", got)
+	}
+	if !strings.Contains(got, "$path = '") {
+		t.Fatalf("expected delete script to assign the remote path safely, got %q", got)
+	}
+	if !strings.Contains(got, "Test-Path -LiteralPath") {
+		t.Fatalf("expected windows delete command to check existence first, got %q", got)
+	}
+	if !strings.Contains(got, "Remove-Item -LiteralPath") {
+		t.Fatalf("expected windows delete command to remove the literal path, got %q", got)
+	}
+}

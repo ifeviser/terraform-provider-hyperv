@@ -751,16 +751,20 @@ func (c *ClientConfig) DirectoryExists(ctx context.Context, remoteDirectoryPath 
 	return exists, nil
 }
 
+func buildDeleteCommand(remotePath string, isWindows bool) string {
+	if isWindows {
+		escapedRemotePath := strings.ReplaceAll(remotePath, "'", "''")
+		return fmt.Sprintf("$ErrorActionPreference = 'Stop'; $path = '%s'; if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }", escapedRemotePath)
+	}
+
+	return fmt.Sprintf("rm -rf '%s'", remotePath)
+}
+
 // DeleteFileOrDirectory removes a file or directory from the remote system
 func (c *ClientConfig) DeleteFileOrDirectory(ctx context.Context, remotePath string) error {
 	log.Printf("[DEBUG] Deleting file or directory: %s", remotePath)
 
-	var command string
-	if c.IsWindows {
-		command = fmt.Sprintf("powershell -Command \"Remove-Item -Path '%s' -Recurse -Force -ErrorAction SilentlyContinue\"", remotePath)
-	} else {
-		command = fmt.Sprintf("rm -rf '%s'", remotePath)
-	}
+	command := buildDeleteCommand(remotePath, c.IsWindows)
 
 	_, stderr, exitCode, err := c.runCommand(ctx, command)
 	if err != nil {
