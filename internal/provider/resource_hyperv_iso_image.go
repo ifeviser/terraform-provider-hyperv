@@ -85,6 +85,21 @@ func resourceHyperVIsoImage() *schema.Resource {
 					if existing := existingHash.(string); existing != "" && existing != h {
 						return nil
 					}
+
+					if err := d.SetNew(hashKey, h); err != nil {
+						return err
+					}
+
+					return nil
+				}
+
+				// For new resources we intentionally avoid materializing a
+				// concrete hash in the plan. This prevents a mutable build
+				// artifact (for example a zip created by another resource in the
+				// same apply) from becoming a stable planned value that can drift
+				// before apply. The hash is populated into state during Create.
+				if d.Id() == "" {
+					return nil
 				}
 
 				if err := d.SetNew(hashKey, h); err != nil {
@@ -272,6 +287,67 @@ func computeFileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// resolveLocalFileSHA256 computes the SHA256 hex digest for a local file path when the
+// path points to an existing regular file on disk.
+func resolveLocalFileSHA256(sourcePath string) (string, bool, error) {
+	if sourcePath == "" {
+		return "", false, nil
+	}
+
+	// Skip urls (http://, https://, file:// etc.)
+	if strings.Contains(sourcePath, "://") || strings.HasPrefix(strings.ToLower(sourcePath), "http") {
+		return "", false, nil
+	}
+
+	// Expand environment variables and ~ if present via filepath (best-effort)
+	expanded := os.ExpandEnv(sourcePath)
+	// Do not attempt to resolve ~; leave to user if needed.
+
+	fi, statErr := os.Stat(expanded)
+	if os.IsNotExist(statErr) {
+		// file not present locally; nothing to compute
+		return "", false, nil
+	}
+
+	if statErr != nil {
+		return "", false, statErr
+	}
+
+	if fi.IsDir() {
+		// directory path; nothing to compute
+		return "", false, nil
+	}
+
+	h, err := computeFileSHA256(expanded)
+	if err != nil {
+		return "", false, err
+	}
+
+	return h, true, nil
+}
+
+func ensureLocalSourceFileHashState(d *schema.ResourceData, sourceKey, hashKey string) error {
+	sourcePath := d.Get(sourceKey).(string)
+	if sourcePath == "" {
+		return nil
+	}
+
+	if existingHash := d.Get(hashKey).(string); existingHash != "" {
+		return nil
+	}
+
+	hash, ok, err := resolveLocalFileSHA256(sourcePath)
+	if err != nil || !ok {
+		return err
+	}
+
+	if err := d.Set(hashKey, hash); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func winPath(path string) string {
 	if len(path) == 0 {
 		return path
@@ -400,6 +476,16 @@ func ensureFileStateCreate(ctx context.Context, d *schema.ResourceData, c api.Cl
 func resourceHyperVIsoImageCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	log.Printf("[INFO][iso-image][create] creating remote iso: %#v", d)
 	c := meta.(api.Client)
+
+	if err := ensureLocalSourceFileHashState(d, "source_iso_file_path", "source_iso_file_path_hash"); err != nil {
+		return diag.FromErr(err)
+	}
+	if err := ensureLocalSourceFileHashState(d, "source_zip_file_path", "source_zip_file_path_hash"); err != nil {
+		return diag.FromErr(err)
+	}
+	if err := ensureLocalSourceFileHashState(d, "source_boot_file_path", "source_boot_file_path_hash"); err != nil {
+		return diag.FromErr(err)
+	}
 
 	sourceIsoFilePath := (d.Get("source_iso_file_path")).(string)
 	sourceIsoFilePathHash := (d.Get("source_iso_file_path_hash")).(string)
