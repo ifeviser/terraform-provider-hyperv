@@ -248,6 +248,7 @@ func New(version string, commit string) func() *schema.Provider {
 			},
 
 			ResourcesMap: map[string]*schema.Resource{
+				"hyperv_dda_assignment":   resourceHyperVDdaAssignment(),
 				"hyperv_network_switch":   resourceHyperVNetworkSwitch(),
 				"hyperv_machine_instance": resourceHyperVMachineInstance(),
 				"hyperv_vhd":              resourceHyperVVhd(),

@@ -116,6 +116,7 @@ Environment variables: `HYPERV_HOST`, `HYPERV_USER`, `HYPERV_PASSWORD`, `HYPERV_
 - `hyperv_network_switch` - Virtual switches
 - `hyperv_vhd` - Virtual hard disks
 - `hyperv_machine_instance` - Virtual machines
+- `hyperv_dda_assignment` - Discrete device assignments from PCI Express resource pools
 - `hyperv_iso_image` - ISO images
 
 See [documentation](https://registry.terraform.io/providers/bafbi/hyperv/latest/docs) for details.

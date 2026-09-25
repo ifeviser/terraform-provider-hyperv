@@ -1,6 +1,7 @@
 package api
 
 type Client interface {
+	HypervDdaAssignmentClient
 	HypervVhdClient
 	HypervVmClient
 	HypervVmDvdDriveClient
