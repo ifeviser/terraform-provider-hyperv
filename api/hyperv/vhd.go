@@ -15,6 +15,9 @@ import (
 const (
 	vhdBusyRetryInterval = 10 * time.Second
 	vhdBusyRetryTimeout  = 5 * time.Minute
+	// Shorter than the resource's delete timeout so a persistent lock is
+	// reported with its cause rather than as a context deadline.
+	vhdDeleteRetryTimeout = 30 * time.Second
 )
 
 type existsVhdArgs struct {
@@ -441,7 +444,8 @@ func isVhdResourceBusyError(err error) bool {
 
 	return strings.Contains(errMessage, "objectinuse") ||
 		strings.Contains(errMessage, "resourcebusy") ||
-		strings.Contains(errMessage, "object is in use")
+		strings.Contains(errMessage, "object is in use") ||
+		strings.Contains(errMessage, "being used by another process")
 }
 
 type deleteVhdArgs struct {
@@ -459,14 +463,19 @@ $targetBaseName = [System.IO.Path]::GetFileNameWithoutExtension($targetLeaf)
 if (Test-Path -LiteralPath $targetDirectory) {
     $filesToDelete = Get-ChildItem -LiteralPath $targetDirectory | Where-Object { $_.BaseName -ne $null -and $_.BaseName.StartsWith($targetBaseName) } | Select-Object -ExpandProperty FullName
     
+    $failures = @()
     foreach ($file in $filesToDelete) {
         try {
             if (Test-Path -LiteralPath $file) {
                 Remove-Item -LiteralPath $file -Force -ErrorAction Stop
             }
         } catch {
-            Write-Warning "Failed to delete $file : $_"
+            $failures += "$file : $_"
         }
+    }
+
+    if ($failures) {
+        throw "Failed to delete VHD file(s): $($failures -join '; ')"
     }
 }
 `))
@@ -474,8 +483,10 @@ if (Test-Path -LiteralPath $targetDirectory) {
 func (c *ClientConfig) DeleteVhd(ctx context.Context, path string) (err error) {
 	// Convert to Windows path for PowerShell
 	windowsPath := api.ToWindowsPath(path)
-	err = c.ScriptRunner.RunFireAndForgetScript(ctx, deleteVhdTemplate, deleteVhdArgs{
-		Path: windowsPath,
+	err = runVhdOperationWithRetry(ctx, windowsPath, "DeleteVhd", vhdBusyRetryInterval, vhdDeleteRetryTimeout, func() error {
+		return c.ScriptRunner.RunFireAndForgetScript(ctx, deleteVhdTemplate, deleteVhdArgs{
+			Path: windowsPath,
+		})
 	})
 
 	return err

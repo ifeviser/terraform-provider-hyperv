@@ -37,6 +37,11 @@ func TestIsVhdResourceBusyError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "file locked by another process",
+			err:  errors.New("Failed to delete VHD file(s): C:\\VMs\\disk.vhdx : The process cannot access the file 'C:\\VMs\\disk.vhdx' because it is being used by another process."),
+			want: true,
+		},
+		{
 			name: "other error",
 			err:  errors.New("Access denied"),
 			want: false,
