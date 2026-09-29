@@ -34,6 +34,7 @@ func resourceHyperVVhd() *schema.Resource {
 		ReadContext:   resourceHyperVVhdRead,
 		UpdateContext: resourceHyperVVhdUpdate,
 		DeleteContext: resourceHyperVVhdDelete,
+		CustomizeDiff: resourceHyperVVhdCustomizeDiff,
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
@@ -71,7 +72,7 @@ func resourceHyperVVhd() *schema.Resource {
 					"source_disk",
 				},
 				StateFunc:   PathStateFunc,
-				Description: "This field is mutually exclusive with the fields `source_vm`, `parent_path`, `source_disk`. This value can be a url or a path (including wildcards). Box, Zip and 7z files will automatically be expanded. The destination folder will be the directory portion of the path. If expanded files have a folder called `Virtual Machines`, then the `Virtual Machines` folder will be used instead of the entire archive contents. ",
+				Description: "This field is mutually exclusive with the fields `source_vm`, `parent_path`, `source_disk`. This value can be a url or a path (including wildcards). Box, Zip and 7z files will automatically be expanded. The destination folder will be the directory portion of the path. If expanded files have a folder called `Virtual Machines`, then the `Virtual Machines` folder will be used instead of the entire archive contents. Changing a non-empty value replaces the virtual hard disk; setting it on an imported disk only records it in state.",
 			},
 			"source_vm": {
 				Type:     schema.TypeString,
@@ -81,7 +82,7 @@ func resourceHyperVVhd() *schema.Resource {
 					"parent_path",
 					"source_disk",
 				},
-				Description: "This field is mutually exclusive with the fields `source`, `parent_path`, `source_disk`. This value is the name of the vm to copy the vhds from.",
+				Description: "This field is mutually exclusive with the fields `source`, `parent_path`, `source_disk`. This value is the name of the vm to copy the vhds from. Changing a non-empty value replaces the virtual hard disk; setting it on an imported disk only records it in state.",
 			},
 			"source_disk": {
 				Type:     schema.TypeInt,
@@ -91,7 +92,7 @@ func resourceHyperVVhd() *schema.Resource {
 					"source_vm",
 					"parent_path",
 				},
-				Description: "This field is mutually exclusive with the fields `source`, `source_vm`, `parent_path`. Specifies the physical disk to be used as the source for the virtual hard disk to be created.",
+				Description: "This field is mutually exclusive with the fields `source`, `source_vm`, `parent_path`. Specifies the physical disk to be used as the source for the virtual hard disk to be created. Changing a non-zero value replaces the virtual hard disk; setting it on an imported disk only records it in state.",
 			},
 			"vhd_type": {
 				Type:             schema.TypeString,
@@ -107,6 +108,7 @@ func resourceHyperVVhd() *schema.Resource {
 			"parent_path": {
 				Type:     schema.TypeString,
 				Optional: true,
+				ForceNew: true,
 				ConflictsWith: []string{
 					"source",
 					"source_vm",
@@ -114,7 +116,7 @@ func resourceHyperVVhd() *schema.Resource {
 				},
 				DiffSuppressFunc: PathDiffSuppress,
 				StateFunc:        PathStateFunc,
-				Description:      "This field is mutually exclusive with the fields `source`, `source_vm`, `source_disk`, `size`. Specifies the path to the parent of the differencing disk to be created (this parameter may be specified only for the creation of a differencing disk).",
+				Description:      "This field is mutually exclusive with the fields `source`, `source_vm`, `source_disk`, `size`. Specifies the path to the parent of the differencing disk to be created (this parameter may be specified only for the creation of a differencing disk). Changing this value replaces the virtual hard disk.",
 			},
 			"size": {
 				Type:     schema.TypeInt,
@@ -195,6 +197,26 @@ func resourceHyperVVhd() *schema.Resource {
 			},
 		},
 	}
+}
+
+// Changing an existing copy source must replace the disk, because the copy only
+// runs when the destination is absent. An empty old value is not a change of
+// source: import cannot discover where a disk was copied from, so setting the
+// source after import is adopted into state without replacing the disk.
+func resourceHyperVVhdCustomizeDiff(_ context.Context, d *schema.ResourceDiff, _ interface{}) error {
+	for _, key := range []string{"source", "source_vm", "source_disk"} {
+		if !d.HasChange(key) {
+			continue
+		}
+
+		if oldValue, _ := d.GetChange(key); oldValue != "" && oldValue != 0 {
+			if err := d.ForceNew(key); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func resourceHyperVVhdCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -329,8 +351,7 @@ func resourceHyperVVhdUpdate(ctx context.Context, d *schema.ResourceData, meta i
 
 	exists := (d.Get("exists")).(bool)
 
-	if !exists || d.HasChange("path") || d.HasChange("source") || d.HasChange("source_vm") || d.HasChange("source_disk") || d.HasChange("parent_path") {
-		// delete it as its changed
+	if !exists || d.HasChange("path") {
 		err := c.CreateOrUpdateVhd(ctx, path, source, sourceVm, sourceDisk, vhdType, parentPath, size, blockSize, logicalSectorSize, physicalSectorSize)
 
 		if err != nil {
